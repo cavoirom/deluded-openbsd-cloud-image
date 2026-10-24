@@ -13,33 +13,31 @@ on:
 
 jobs:
     build-generic:
-        uses: hcartiaux/openbsd-cloud-image/.github/workflows/build.yml@main
+        uses: ./.github/workflows/build.yml
         with:
             release: ${{inputs.release}}
             filename: openbsd-generic.qcow2
-            size: 30
+            size: '30'
             disklabel: custom/disklabel
             sets: all
-            allow_root_ssh: no
     build-min:
-        uses: hcartiaux/openbsd-cloud-image/.github/workflows/build.yml@main
+        uses: ./.github/workflows/build.yml
         with:
             filename: openbsd-min.qcow2
             release: ${{inputs.release}}
-            size: 2
+            size: '2'
             disklabel: custom/disklabel.cloud
             sets: -game*.tgz -x*.tgz
-            allow_root_ssh: no
 
     test-generic:
         needs: build-generic
-        uses: hcartiaux/openbsd-cloud-image/.github/workflows/test.yml@main
+        uses: ./.github/workflows/test.yml
         with:
             filename: openbsd-generic.qcow2
 
     test-min:
         needs: build-min
-        uses: hcartiaux/openbsd-cloud-image/.github/workflows/test.yml@main
+        uses: ./.github/workflows/test.yml
         with:
             filename: openbsd-min.qcow2
 

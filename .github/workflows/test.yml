@@ -12,7 +12,9 @@ on:
 jobs:
     test:
         runs-on: ubuntu-latest
+        timeout-minutes: 30
         steps:
+        - uses: actions/checkout@v6
         - uses: actions/download-artifact@v8
           with:
             name: ${{inputs.filename}}
@@ -25,39 +27,48 @@ jobs:
           run: |
             sha256sum -c images/${{inputs.filename}}.sha256
         - name: Install dependencies
-          run: sudo apt update ; sudo apt install -y qemu-system netcat-openbsd genisoimage
-        - name: Generate ssh keys
+          run: sudo apt update && sudo apt install -y qemu-system genisoimage
+        - name: Generate test SSH key and cloud-init metadata
           run: |
-            mkdir -p ~/.ssh
-            ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
-        - name: generate cloud-init user-data configuration file
-          run: |
-            echo '#cloud-config'                   > user-data
-            echo 'users:'                         >> user-data
-            echo '- name: test'                   >> user-data
-            echo '  ssh_authorized_keys:'         >> user-data
-            echo "  - $(cat ~/.ssh/id_rsa.pub)"   >> user-data
-            echo 'instance-id: OpenBSD0'           > meta-data
-            echo 'local-hostname: openbsd-00'     >> meta-data
+            ssh-keygen -t ed25519 -f "$RUNNER_TEMP/image-test-key" -N ""
+            echo '#cloud-config' > user-data
+            {
+                echo 'instance-id: OpenBSD0'
+                echo 'local-hostname: openbsd-00'
+                echo 'public-keys:'
+                echo "  - $(cat "$RUNNER_TEMP/image-test-key.pub")"
+            } > meta-data
         - name: Generate nocloud.iso
           run: genisoimage -output nocloud.iso -volid cidata -joliet -rock user-data meta-data
         - name: Boot the system image
           run: |
-            set -x
-            qemu-system-x86_64 -smp cpus=1 -m 384m -boot c                    \
+            qemu-system-x86_64 -smp cpus=2 -m 2G -boot c                      \
                -drive file="images/${{inputs.filename}}",media=disk,if=virtio \
                -drive file="nocloud.iso",media=cdrom                          \
-               -device virtio-net-pci,netdev=n1 -nographic -netdev user,id=n1,hostfwd=tcp::2222-:22 &
-        - name: Wait for a successful ssh connection
+               -device virtio-net-pci,netdev=n1 -nographic                    \
+               -netdev user,id=n1,hostfwd=tcp:127.0.0.1:2222-:22 > qemu.log 2>&1 &
+        - name: Wait for cavoirom SSH and cloud-init completion
           run: |
-            max=300
-            while ! ssh -i ~/.ssh/id_rsa -oPasswordAuthentication=no -oStrictHostKeyChecking=no -oUserKnownHostsFile=/dev/null -oConnectTimeout=2 test@localhost -p 2222 true ; do
-                sleep 1 ; try=$((try + 1))
-                if [[ "$try" -gt "$max" ]] ; then
-                    echo "== System configuration failed :(  =="
+            ssh_options=(-i "$RUNNER_TEMP/image-test-key" -p 2222
+                -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=2
+                -o StrictHostKeyChecking=accept-new
+                -o UserKnownHostsFile="$RUNNER_TEMP/image-test-known-hosts")
+            for try in {1..300}; do
+                if ssh "${ssh_options[@]}" cavoirom@127.0.0.1 true; then
+                    break
+                fi
+                if [[ "$try" == 300 ]]; then
+                    cat qemu.log
                     exit 1
                 fi
-                echo "== Connection attempt ${try}/${max} =="
+                sleep 1
             done
-            echo "== System is bootable and configured ! :) =="
-
+            timeout 600 ssh "${ssh_options[@]}" cavoirom@127.0.0.1 cloud-init status --wait --long
+        - name: Test SSH and doas policy
+          run: node .github/tests/cloud-image.mjs "$RUNNER_TEMP/image-test-key" "$RUNNER_TEMP/image-test-known-hosts"
+        - name: Save the boot log on failure
+          if: failure()
+          uses: actions/upload-artifact@v7
+          with:
+            name: ${{inputs.filename}}-test-log
+            path: qemu.log

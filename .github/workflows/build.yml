@@ -28,11 +28,6 @@ on:
         default: 'all'
         required: false
         type: string
-      allow_root_ssh:
-        description: 'Allow root ssh login (yes|no)'
-        default: 'yes'
-        required: false
-        type: string
 
 jobs:
     build:
@@ -44,7 +39,7 @@ jobs:
           run: sudo apt update ; sudo apt install -y signify-openbsd signify-openbsd-keys qemu-system
         - name: Build !
           run: |
-            ./build_openbsd_qcow2.sh -r '${{inputs.release}}' --image-file '${{inputs.filename}}' --size '${{inputs.size}}' --disklabel '${{inputs.disklabel}}' --sets '${{inputs.sets}}' --allow_root_ssh '${{inputs.allow_root_ssh}}' -b
+            ./build_openbsd_qcow2.sh -r '${{inputs.release}}' --image-file '${{inputs.filename}}' --size '${{inputs.size}}' --disklabel '${{inputs.disklabel}}' --sets '${{inputs.sets}}' -b
         - name: Generate the checksum file
           run: |
             sha256sum images/${{inputs.filename}} > images/${{inputs.filename}}.sha256

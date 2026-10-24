@@ -36,27 +36,104 @@ cd "cloud-init-${CLOUD_INIT_VERSION}"
 # Patching cloud-init bugs
 ###########
 
-# The dmidecode package is only available on i386 & amd64
-if ! pkg_info dmidecode > /dev/null 2>&1 ; then
-   sed -i '/dmidecode/d' tools/build-on-openbsd
-fi
-
 # Fix: update_etc_hosts requires hosts.openbsd.tmpl which is absent on OpenBSD
 # causing a permanent status:failed at every boot
 sed -i 's/^  - update_etc_hosts/  # - update_etc_hosts/' config/cloud.cfg.tmpl
 
 ###########
-# Start the install script
+# Build cloud-init
 ###########
 
-./tools/build-on-openbsd
+# Install runtime dependencies without sudo or the CI/test dependency set.
+runtime_pkgs=$(./tools/read-dependencies --distro openbsd --runtime-requires |
+    grep -v '^sudo--$')
+pkg_add ${runtime_pkgs}
+pkg_add bash meson
+meson setup builddir -Dinit_system=sysvinit_openbsd -Dsysconfdir=/etc \
+    -Dbash_completion=false
+meson install -C builddir
+pkg_delete meson bash
+pkg_delete -a
+
+# These services run complete provisioning stages, not short daemon startups.
+for service in cloudinitlocal cloudinit cloudconfig cloudfinal; do
+    rcctl set "$service" timeout 300
+done
+
+###########
+# Key-only login and first-password setup
+###########
+
+# A dead password rejects BSD authentication even while its field is empty.
+# passwd can then set the first password without requesting an old password.
+cat >> /etc/login.conf <<'EOF'
+
+cavoirom:\
+    :auth=passwd:\
+    :auth-doas=passwd:\
+    :password-dead=0:\
+    :passwordtime=0:\
+    :tc=default:
+EOF
+cap_mkdb /etc/login.conf
+useradd -m -s /bin/ksh -G wheel -L cavoirom -p '' -f 1 cavoirom
+
+# Put policy before existing directives: sshd uses the first obtained value.
+# Keep access key-only even before cloud-init applies ssh_pwauth.
+cat > /tmp/sshd-policy <<'EOF'
+AllowUsers cavoirom
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+EOF
+cat /tmp/sshd-policy /etc/ssh/sshd_config > /tmp/sshd_config
+install -m 600 /tmp/sshd_config /etc/ssh/sshd_config
+rm /tmp/sshd-policy /tmp/sshd_config
+
+# Do not let cloud-init lock or replace the pre-created user's password.
+# Its SSH module installs our key and keys supplied by the cloud platform.
+cat > /etc/cloud/cloud.cfg.d/99-cavoirom.cfg <<'EOF'
+users:
+  - default
+disable_root: true
+ssh_pwauth: false
+ssh_authorized_keys:
+  - 'sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBLNO6avyfBTjQtE3OifB61ecly2LlyFm54MWLfSjOG3nmxooHsGohIT98F9weXE3q749fK1pnywchqxm9GxybFsAAAAEc3NoOg== ssh:'
+# OpenBSD generates missing keys before starting sshd. Keep those keys stable.
+ssh_deletekeys: false
+system_info:
+  default_user:
+    name: cavoirom
+    gecos: cavoirom
+    groups: [wheel]
+    shell: /bin/ksh
+    lock_passwd: false
+    # Acknowledge the initial blank field without overwriting a later password.
+    hashed_passwd: ''
+    sudo: null
+    doas:
+      - permit persist cavoirom as root
+EOF
+
+/usr/sbin/sshd -G > /dev/null
+if pkg_info -e 'sudo-*'; then
+    echo 'Unexpected sudo package in the image' >&2
+    exit 1
+fi
+usermod -p '*' root
+rm -f /root/.ssh/authorized_keys
 
 ###########
 # Clean-up
 ###########
 
 cd /tmp
-rm -r "/tmp/cloud-init-${CLOUD_INIT_VERSION}"
+rm -r "/tmp/cloud-init-${CLOUD_INIT_VERSION}" "/tmp/${CLOUD_INIT_VERSION}.tar.gz"
+
+# Each instance must generate its own host keys.
+rm -f /etc/ssh/ssh_host_*
 
 # Clean-up the network config
 rm -f /etc/resolv.conf /etc/hostname.*

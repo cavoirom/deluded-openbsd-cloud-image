@@ -43,15 +43,13 @@ IMAGE_SIZE=20
 IMAGE_NAME=""
 
 QEMU_CPUS=2
-QEMU_MEM=384m
+QEMU_MEM=2G
 
 DISKLABEL="custom/disklabel"
 INSTALLCONF="custom/install.conf"
 
-SSH_KEY_VAL=none
 HTTP_SERVER=10.0.2.2
 HOST_NAME="openbsd"
-ALLOW_ROOT_SSH="yes"
 
 ### Functions
 
@@ -111,10 +109,9 @@ function build_mirror {
     exec_cmd "sed -i 's!\(disklabel = \).*\$!\1http://${HTTP_SERVER}/disklabel!' '${PATH_MIRROR}/install.conf'"
     exec_cmd "sed -i 's!\(hostname = \).*\$!\1${HOST_NAME}!'                     '${PATH_MIRROR}/install.conf'"
     exec_cmd "sed -i 's!\(HTTP Server = \).*\$!\1${HTTP_SERVER}!'                '${PATH_MIRROR}/install.conf'"
-    exec_cmd "sed -i 's!\(Allow root ssh login = \).*\$!\1${ALLOW_ROOT_SSH}!'    '${PATH_MIRROR}/install.conf'"
-    [ -n "$SSH_KEY" ] && SSH_KEY_VAL=$(cat "$SSH_KEY")
+    exec_cmd "sed -i 's!\(Allow root ssh login = \).*\$!\1no!'                  '${PATH_MIRROR}/install.conf'"
+    exec_cmd "sed -i '/^Public ssh key for root account = /d'                 '${PATH_MIRROR}/install.conf'"
     exec_cmd "echo 'Set name(s) = ${SETS}'                                    >> '${PATH_MIRROR}/install.conf'"
-    exec_cmd "echo 'Public ssh key for root account = ${SSH_KEY_VAL}'         >> '${PATH_MIRROR}/install.conf'"
 
     exec_cmd ln -sf "../${DISKLABEL}" "${PATH_MIRROR}/disklabel"
 }
@@ -216,14 +213,8 @@ OPTIONS
     --http_server IP
       IP of the HTTP mirror hosting the sets and disklabel file (default: ${HTTP_SERVER})
 
-    --sshkey <PUB KEY FILE PATH>
-      Path to a SSH public key file for the root user (default: ${SSH_KEY_VAL})
-
     --sets "<SET NAMES>"
       Specify the sets to be installed (default: ${SETS})
-
-    --allow_root_ssh [yes|no]
-      Allow root ssh login (default: ${ALLOW_ROOT_SSH})
 
 AUTHOR
   Hyacinthe Cartiaux <Hyacinthe.Cartiaux@gmail.com>
@@ -246,12 +237,11 @@ while [ $# -ge 1 ]; do
         -s | --size)      shift; IMAGE_SIZE=$1                ;;
         --disklabel)      shift; DISKLABEL=$1                 ;;
         --installconf)    shift; INSTALLCONF=$1               ;;
-        --sshkey)         shift; SSH_KEY=$1                   ;;
         -r | --release)   shift; OPENBSD_VERSION=$1           ;;
         --host_name)      shift; HOST_NAME=$1                 ;;
         --http_server)    shift; HTTP_SERVER=$1               ;;
         --sets)           shift; SETS="$1"                    ;;
-        --allow_root_ssh) shift; ALLOW_ROOT_SSH="$1"          ;;
+        *)               fail "Unknown option: $1"           ;;
     esac
     shift
 done
@@ -260,10 +250,8 @@ done
 [[ ! "${OPENBSD_VERSION}" =~ ^[0-9]+\.[0-9+]$                              ]] && fail "Invalid OpenBSD version"
 [[ ! "${HOST_NAME}"       =~ ^[a-z0-9-]+$                                  ]] && fail "Invalid hostname"
 [[ ! "${HTTP_SERVER}"     =~ ^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$ ]] && fail "${HTTP_SERVER} is not an IPv4"
-[[ ! "${ALLOW_ROOT_SSH}"  =~ ^(yes|no)+$                                   ]] && fail "Invalid parameter value for --allow-root-ssh (yes or no)"
 [[ ! -e "${DISKLABEL}"                                                     ]] && fail "Non existing disklabel file"
 [[ ! -e "${INSTALLCONF}"                                                   ]] && fail "Non existing install.conf file"
-[[ -n "${SSH_KEY}" && ! -e "${SSH_KEY}"                                    ]] && fail "Non existing SSH public key file"
 
 if [[ -z "$RUN" ]]; then
     print_help
