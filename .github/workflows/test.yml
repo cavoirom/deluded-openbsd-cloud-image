@@ -31,7 +31,7 @@ jobs:
         - name: Generate test SSH key and cloud-init metadata
           run: |
             ssh-keygen -t ed25519 -f "$RUNNER_TEMP/image-test-key" -N ""
-            echo '#cloud-config' > user-data
+            printf '#cloud-config\n{}\n' > user-data
             {
                 echo 'instance-id: OpenBSD0'
                 echo 'local-hostname: openbsd-00'
@@ -44,7 +44,7 @@ jobs:
           run: |
             qemu-system-x86_64 -smp cpus=2 -m 2G -boot c                      \
                -drive file="images/${{inputs.filename}}",media=disk,if=virtio \
-               -drive file="nocloud.iso",media=cdrom                          \
+               -cdrom nocloud.iso                                            \
                -device virtio-net-pci,netdev=n1 -nographic                    \
                -netdev user,id=n1,hostfwd=tcp:127.0.0.1:2222-:22 > qemu.log 2>&1 &
         - name: Wait for cavoirom SSH and cloud-init completion
