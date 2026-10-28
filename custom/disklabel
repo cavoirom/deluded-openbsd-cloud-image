@@ -1,5 +1,5 @@
 /           150M-1G
-swap        80M-256M 10%
+swap        2G      10%
 /usr        1.5G-30G 5%
 /tmp        120M-4G  8%
 /var        80M-4G   13%

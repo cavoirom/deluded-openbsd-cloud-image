@@ -17,7 +17,7 @@ jobs:
         with:
             release: ${{inputs.release}}
             filename: openbsd-generic.qcow2
-            size: '30'
+            size: '23'
             disklabel: custom/disklabel
             sets: all
     build-min:
